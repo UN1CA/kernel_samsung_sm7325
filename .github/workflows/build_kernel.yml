@@ -19,8 +19,7 @@ on:
         required: false
 
 env:
-  # AOSP prebuilts/clang/host/linux-x86 commit shipping clang-r614150 (23.0.1),
-  # the toolchain the device defconfigs are generated with
+  # Clang 23.0.1
   CLANG_COMMIT: 131f4e02e5889bfd7611eb0f3aad048efa7aed81
   CLANG_VERSION: clang-r614150
 
@@ -32,11 +31,10 @@ jobs:
       kernel_sha: ${{ steps.sha.outputs.kernel_sha }}
 
     steps:
-      - id: ts
-        run: |
-          echo "release_ts=$(date +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+      - name: Generate build timestamp
+        id: ts
+        run: echo "release_ts=$(date +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
 
-      # Resolve the kernel ref once so every target builds the same commit
       - name: Checkout kernel
         uses: actions/checkout@v7
         with:
@@ -46,9 +44,9 @@ jobs:
           sparse-checkout: Makefile
           sparse-checkout-cone-mode: false
 
-      - id: sha
-        run: |
-          echo "kernel_sha=$(git -C kernel rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Fetch kernel SHA commit
+        id: sha
+        run: echo "kernel_sha=$(git -C kernel rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
@@ -71,33 +69,9 @@ jobs:
           path: kernel
           fetch-depth: 1
 
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h "$GITHUB_WORKSPACE"
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            bc \
-            bison \
-            build-essential \
-            cpio \
-            curl \
-            flex \
-            git \
-            libelf-dev \
-            libssl-dev \
-            python3 \
-            unzip \
-            wget \
-            zip \
-            zstd
-
       - name: Cache prebuilt Google clang
         id: cache-clang
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: llvm-aosp
           key: ${{ env.CLANG_VERSION }}-${{ env.CLANG_COMMIT }}
@@ -137,8 +111,7 @@ jobs:
           merge-multiple: true
 
       - name: Verify artifacts
-        run: |
-          find artifacts -type f | sort
+        run: find artifacts -type f | sort
 
       - name: Generate release notes
         env:
@@ -146,16 +119,11 @@ jobs:
           KERNEL_SHA: ${{ needs.prepare.outputs.kernel_sha }}
         run: |
           {
-            echo "**Kernel version:** $(cat artifacts/kernel.release-a52sxq)  "
-            echo
-            echo "**Kernel source:** [${KERNEL_SHA}](https://github.com/${{ github.repository }}/tree/${KERNEL_SHA})  "
-            echo
+            echo "**Kernel version:** $(cat artifacts/kernel.release-a52sxq)"
+            echo "**Kernel source:** [${KERNEL_SHA}](https://github.com/${{ github.repository }}/tree/${KERNEL_SHA})"
             echo "**Toolchain:** ${CLANG_VERSION}"
-
-            if [ -n "$CHANGELOG" ]; then
-              echo
+            if [ "$CHANGELOG" ]; then
               echo "**Changelog:**"
-              echo
               printf "%b\n" "$CHANGELOG"
             fi
           } > version.txt

@@ -1,7 +1,6 @@
-# UN1CA sm7325 kernel CI
+# UN1CA kernel CI for Snapdragon 778G devices
 
-Build scripts and GitHub Actions CI for the UN1CA sm7325 kernel
-(Galaxy A52s 5G `a52sxq`, Galaxy A73 5G `a73xq`, Galaxy M52 5G `m52xq`).
+Build scripts and GitHub Actions CI for the Snapdragon 778G devices (Galaxy A52s 5G, Galaxy A73 5G, Galaxy M52 5G) default kernel of UN1CA.
 
 The kernel source lives on the `sixteen` branch of this repository.
 
@@ -27,9 +26,7 @@ Release assets, per target:
 
 ```sh
 git clone -b sixteen https://github.com/UN1CA/kernel_samsung_sm7325 kernel
-# Extract clang-r614150 into ./llvm-aosp
 ./build.sh <a52sxq|a73xq|m52xq>
 ```
 
-Output is placed in `dist/`. `KERNEL_DIR`, `LLVM_DIR`, `OUT_DIR` and
-`DIST_DIR` can be overridden through the environment.
+Output is placed in `dist/`. `KERNEL_DIR`, `LLVM_DIR`, `OUT_DIR` and `DIST_DIR` can be overridden through the environment.

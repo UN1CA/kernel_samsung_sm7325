@@ -65,7 +65,6 @@ build_kernel() {
     mkdir -p "$OUT_DIR"
     make "${MAKE_ARGS[@]}" "$DEFCONFIG"
 
-    # Builds Image, dtbs, dtbo.img and modules
     make "${MAKE_ARGS[@]}" -j"$(nproc)"
 
     make "${MAKE_ARGS[@]}" \
@@ -86,16 +85,15 @@ collect_dist() {
 
     cp "$BOOT_DIR/Image" "$DIST_DIR/Image-$DEVICE"
     cp "$BOOT_DIR/dtbo.img" "$DIST_DIR/dtbo-$DEVICE.img"
+    cp "$DTB_DIR/yupik.dtb" "$DIST_DIR/dtb-$DEVICE"
 
-    # SoC base DTB (goes into vendor_boot)
-    if ! compgen -G "$DTB_DIR/*.dtb" > /dev/null; then
-        echo "No base DTB found in $DTB_DIR" >&2
-        exit 1
-    fi
-    cat "$DTB_DIR"/*.dtb > "$DIST_DIR/dtb-$DEVICE"
-
-    # Flat, stripped kernel modules
     find "$OUT_DIR/modules_install/lib/modules" -name "*.ko" -exec cp {} "$MOD_DIR/" \;
+    cp "$OUT_DIR/modules_install/lib/modules/$(cat "$OUT_DIR/include/config/kernel.release")/modules.alias" "$MOD_DIR/modules.alias"
+    cp "$OUT_DIR/modules_install/lib/modules/$(cat "$OUT_DIR/include/config/kernel.release")/modules.dep" "$MOD_DIR/modules.dep"
+    cp "$OUT_DIR/modules_install/lib/modules/$(cat "$OUT_DIR/include/config/kernel.release")/modules.softdep" "$MOD_DIR/modules.softdep"
+    cp "$OUT_DIR/modules_install/lib/modules/$(cat "$OUT_DIR/include/config/kernel.release")/modules.order" "$MOD_DIR/modules.load"
+    sed -i 's/\(kernel\/[^: ]*\/\)\([^: ]*\.ko\)/\/lib\/modules\/\2/g' "$MOD_DIR/modules.dep"
+    sed -i 's/.*\///g' "$MOD_DIR/modules.load"
     tar -C "$MOD_DIR" -czf "$DIST_DIR/modules-$DEVICE.tar.gz" .
     rm -rf "$MOD_DIR"
 
