@@ -1,0 +1,175 @@
+name: Build kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ref:
+        description: 'Kernel branch/tag/commit'
+        type: string
+        required: true
+        default: 'sixteen'
+      release:
+        description: 'Upload release'
+        type: boolean
+        required: true
+        default: false
+      changelog:
+        description: 'Changelog'
+        type: string
+        required: false
+
+env:
+  # AOSP prebuilts/clang/host/linux-x86 commit shipping clang-r614150 (23.0.1),
+  # the toolchain the device defconfigs are generated with
+  CLANG_COMMIT: 131f4e02e5889bfd7611eb0f3aad048efa7aed81
+  CLANG_VERSION: clang-r614150
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      release_ts: ${{ steps.ts.outputs.release_ts }}
+      kernel_sha: ${{ steps.sha.outputs.kernel_sha }}
+
+    steps:
+      - id: ts
+        run: |
+          echo "release_ts=$(date +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
+      # Resolve the kernel ref once so every target builds the same commit
+      - name: Checkout kernel
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.kernel_ref }}
+          path: kernel
+          fetch-depth: 1
+          sparse-checkout: Makefile
+          sparse-checkout-cone-mode: false
+
+      - id: sha
+        run: |
+          echo "kernel_sha=$(git -C kernel rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [a52sxq, a73xq, m52xq]
+
+    steps:
+      - name: Checkout build scripts
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Checkout kernel
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.kernel_sha }}
+          path: kernel
+          fetch-depth: 1
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h "$GITHUB_WORKSPACE"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            cpio \
+            curl \
+            flex \
+            git \
+            libelf-dev \
+            libssl-dev \
+            python3 \
+            unzip \
+            wget \
+            zip \
+            zstd
+
+      - name: Cache prebuilt Google clang
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: llvm-aosp
+          key: ${{ env.CLANG_VERSION }}-${{ env.CLANG_COMMIT }}
+
+      - name: Download prebuilt Google clang
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          wget -O llvm-aosp.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/${CLANG_COMMIT}/${CLANG_VERSION}.tar.gz"
+          mkdir llvm-aosp
+          tar -xzf llvm-aosp.tar.gz -C llvm-aosp
+          rm llvm-aosp.tar.gz
+
+      - name: Build kernel
+        run: |
+          chmod +x build.sh
+          KERNEL_DIR=kernel ./build.sh ${{ matrix.target }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kernel-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: inputs.release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: kernel-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Verify artifacts
+        run: |
+          find artifacts -type f | sort
+
+      - name: Generate release notes
+        env:
+          CHANGELOG: ${{ inputs.changelog }}
+          KERNEL_SHA: ${{ needs.prepare.outputs.kernel_sha }}
+        run: |
+          {
+            echo "**Kernel version:** $(cat artifacts/kernel.release-a52sxq)  "
+            echo
+            echo "**Kernel source:** [${KERNEL_SHA}](https://github.com/${{ github.repository }}/tree/${KERNEL_SHA})  "
+            echo
+            echo "**Toolchain:** ${CLANG_VERSION}"
+
+            if [ -n "$CHANGELOG" ]; then
+              echo
+              echo "**Changelog:**"
+              echo
+              printf "%b\n" "$CHANGELOG"
+            fi
+          } > version.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          body_path: version.txt
+          tag_name: "${{ needs.prepare.outputs.release_ts }}"
+          target_commitish: ${{ needs.prepare.outputs.kernel_sha }}
+          name: "UN1CA-sm7325-${{ needs.prepare.outputs.release_ts }}"
+          files: |
+            artifacts/Image-*
+            artifacts/dtbo-*.img
+            artifacts/dtb-*
+            artifacts/modules-*.tar.gz
+            artifacts/sha256sums-*.txt
